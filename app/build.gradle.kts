@@ -1,6 +1,6 @@
 plugins { id("com.android.application"); id("org.jetbrains.kotlin.android"); id("org.jetbrains.kotlin.plugin.compose"); id("com.google.devtools.ksp") }
 android {
- namespace = "es.iesvirgendelacaridad.etcp"; compileSdk = 36
+ namespace = "es.iesvirgendelacaridad.etcp"; compileSdk = 37
  defaultConfig { applicationId = "es.iesvirgendelacaridad.etcp"; minSdk = 28; targetSdk = 36; versionCode = 1; versionName = "1.0.0" }
  buildFeatures { compose = true }
  packaging { resources.excludes += "/META-INF/{AL2.0,LGPL2.1}" }
