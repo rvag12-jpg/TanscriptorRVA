@@ -30,6 +30,7 @@ class MainActivity : ComponentActivity() {
     @Composable
     private fun EtcpApp() {
         var audio by remember { mutableStateOf<Uri?>(null) }
+        var audioName by remember { mutableStateOf("") }
         var segments by remember { mutableStateOf<List<Uri>>(emptyList()) }
         var selectedPart by remember { mutableIntStateOf(0) }
         var busy by remember { mutableStateOf(false) }
@@ -37,14 +38,23 @@ class MainActivity : ComponentActivity() {
         var summary by remember { mutableStateOf("") }
         var status by remember { mutableStateOf("Preparado. No se necesita API key.") }
         val scope = rememberCoroutineScope()
-        var meetingDate by remember {
-            mutableStateOf(LocalDate.now().format(DateTimeFormatter.ofPattern("dd/MM/yyyy")))
+        var meetingDate by remember { mutableStateOf(LocalDate.now().format(DateTimeFormatter.ofPattern("dd/MM/yyyy"))) }
+
+        fun displayName(uri: Uri): String {
+            var name = uri.lastPathSegment ?: "audio"
+            runCatching {
+                contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
+                    if (c.moveToFirst()) name = c.getString(0) ?: name
+                }
+            }
+            return name
         }
 
         fun share(uri: Uri, part: Int, total: Int) {
             val sendIntent = Intent(Intent.ACTION_SEND).apply {
-                type = "audio/mp4"
+                type = "audio/*"
                 putExtra(Intent.EXTRA_STREAM, uri)
+                clipData = android.content.ClipData.newUri(contentResolver, "audio", uri)
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
             runCatching {
@@ -53,22 +63,25 @@ class MainActivity : ComponentActivity() {
             }.onFailure { status = "No se pudo compartir: ${it.message}" }
         }
 
+        // Use */* deliberately: Samsung My Files, Downloads, Drive and some recorders
+        // expose .m4a as application/octet-stream rather than audio/mp4. Filtering only
+        // audio/* makes a valid M4A visible but disabled/unselectable.
         val audioPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
             if (uri != null) {
                 runCatching { contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
                 if (segments.isNotEmpty()) AudioSegmenter.deleteSegments(this@MainActivity, segments)
                 audio = uri
+                audioName = displayName(uri)
                 segments = emptyList()
                 selectedPart = 0
-                status = "Audio seleccionado. Pulsa «Preparar para Sider»."
+                status = "Audio cargado: $audioName. Pulsa «Preparar para Sider»."
             }
         }
 
         val transcriptPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
             if (uri != null) {
                 runCatching {
-                    contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
-                        ?: error("No se pudo leer el archivo")
+                    contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() } ?: error("No se pudo leer el archivo")
                 }.onSuccess {
                     transcript = it
                     status = "Transcripción importada. Puedes revisarla y generar el PDF."
@@ -76,44 +89,27 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        Scaffold(topBar = { TopAppBar(title = { Text("TanscriptorRVA 1.1") }) }) { padding ->
-            Column(
-                Modifier.padding(padding).padding(16.dp).fillMaxSize(),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                OutlinedTextField(
-                    value = meetingDate,
-                    onValueChange = { meetingDate = it },
-                    label = { Text("Fecha de la reunión (dd/MM/aaaa)") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                Text("Sin API: TanscriptorRVA divide automáticamente audios largos en bloques de hasta 50 minutos para enviarlos a Sider.")
+        Scaffold(topBar = { TopAppBar(title = { Text("TanscriptorRVA 1.1.1") }) }) { padding ->
+            Column(Modifier.padding(padding).padding(16.dp).fillMaxSize(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedTextField(value = meetingDate, onValueChange = { meetingDate = it }, label = { Text("Fecha de la reunión (dd/MM/aaaa)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                Text("Sin API: selecciona cualquier archivo desde Descargas, Mis archivos, Drive u otro proveedor. La app comprobará el audio al prepararlo.")
 
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(enabled = !busy, onClick = { audioPicker.launch(arrayOf("audio/mp4", "audio/x-m4a", "audio/*")) }) {
-                        Text("Seleccionar audio")
-                    }
-                    Button(
-                        enabled = audio != null && !busy,
-                        onClick = {
-                            val source = audio ?: return@Button
-                            busy = true
-                            status = "Preparando fragmentos de audio…"
-                            scope.launch {
-                                runCatching { withContext(Dispatchers.IO) { AudioSegmenter.segment(this@MainActivity, source, 50) } }
-                                    .onSuccess {
-                                        segments = it
-                                        selectedPart = 0
-                                        status = "Audio preparado en ${it.size} parte(s). Pulsa «Enviar parte»."
-                                    }
-                                    .onFailure { status = "Error al preparar el audio: ${it.message}" }
-                                busy = false
-                            }
+                    Button(enabled = !busy, onClick = { audioPicker.launch(arrayOf("*/*")) }) { Text("Cargar audio") }
+                    Button(enabled = audio != null && !busy, onClick = {
+                        val source = audio ?: return@Button
+                        busy = true
+                        status = "Comprobando y preparando fragmentos…"
+                        scope.launch {
+                            runCatching { withContext(Dispatchers.IO) { AudioSegmenter.segment(this@MainActivity, source, 50) } }
+                                .onSuccess { segments = it; selectedPart = 0; status = "Audio preparado en ${it.size} parte(s). Pulsa «Enviar parte»." }
+                                .onFailure { status = "No se pudo procesar «$audioName»: ${it.message}. Selecciona un archivo M4A/MP4 de audio válido." }
+                            busy = false
                         }
-                    ) { Text(if (busy) "Procesando…" else "Preparar para Sider") }
+                    }) { Text(if (busy) "Procesando…" else "Preparar para Sider") }
                 }
+
+                if (audio != null) Text("Archivo seleccionado: $audioName")
 
                 if (segments.isNotEmpty()) {
                     Text("Fragmentos: ${segments.size} · Seleccionado: ${selectedPart + 1}/${segments.size}")
@@ -124,7 +120,7 @@ class MainActivity : ComponentActivity() {
                     }
                     OutlinedButton(onClick = {
                         val sendIntent = Intent(Intent.ACTION_SEND_MULTIPLE).apply {
-                            type = "audio/mp4"
+                            type = "audio/*"
                             putParcelableArrayListExtra(Intent.EXTRA_STREAM, ArrayList(segments))
                             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                         }
@@ -134,44 +130,23 @@ class MainActivity : ComponentActivity() {
                 }
 
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(onClick = { transcriptPicker.launch(arrayOf("text/plain", "text/*", "application/json")) }) {
-                        Text("Importar transcripción")
-                    }
+                    OutlinedButton(onClick = { transcriptPicker.launch(arrayOf("text/plain", "text/*", "application/json", "*/*")) }) { Text("Importar transcripción") }
                     OutlinedButton(onClick = {
                         val launchIntent = packageManager.getLaunchIntentForPackage("com.sider.ai")
                         if (launchIntent != null) startActivity(launchIntent)
-                        else status = "Sider no está instalado. Usa el menú Compartir para seleccionar tu aplicación de transcripción."
+                        else status = "Sider no está instalado. Usa «Enviar parte» y selecciona una app compatible en Compartir."
                     }) { Text("Abrir Sider") }
                 }
 
                 Text(status)
-
-                OutlinedTextField(
-                    value = transcript,
-                    onValueChange = { transcript = it },
-                    label = { Text("Transcripción") },
-                    placeholder = { Text("Importa un TXT o pega aquí las transcripciones de las partes") },
-                    modifier = Modifier.fillMaxWidth().weight(1f)
-                )
-
-                OutlinedTextField(
-                    value = summary,
-                    onValueChange = { summary = it },
-                    label = { Text("Resumen ETCP editable") },
-                    placeholder = { Text("Pega o redacta aquí el resumen final") },
-                    modifier = Modifier.fillMaxWidth().weight(1f)
-                )
-
-                Button(
-                    enabled = summary.isNotBlank() || transcript.isNotBlank(),
-                    onClick = {
-                        val content = summary.ifBlank { transcript }
-                        runCatching { PdfExporter.create(this@MainActivity, "Reunión ETCP", meetingDate, content) }
-                            .onSuccess { status = "PDF generado: ${it.absolutePath}" }
-                            .onFailure { status = "Error al generar el PDF: ${it.message}" }
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                ) { Text("Generar PDF") }
+                OutlinedTextField(value = transcript, onValueChange = { transcript = it }, label = { Text("Transcripción") }, placeholder = { Text("Importa un TXT o pega aquí las transcripciones") }, modifier = Modifier.fillMaxWidth().weight(1f))
+                OutlinedTextField(value = summary, onValueChange = { summary = it }, label = { Text("Resumen ETCP editable") }, placeholder = { Text("Pega o redacta aquí el resumen final") }, modifier = Modifier.fillMaxWidth().weight(1f))
+                Button(enabled = summary.isNotBlank() || transcript.isNotBlank(), onClick = {
+                    val content = summary.ifBlank { transcript }
+                    runCatching { PdfExporter.create(this@MainActivity, "Reunión ETCP", meetingDate, content) }
+                        .onSuccess { status = "PDF generado: ${it.absolutePath}" }
+                        .onFailure { status = "Error al generar el PDF: ${it.message}" }
+                }, modifier = Modifier.fillMaxWidth()) { Text("Generar PDF") }
             }
         }
     }
