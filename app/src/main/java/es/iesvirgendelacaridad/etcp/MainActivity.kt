@@ -105,18 +105,78 @@ class MainActivity : ComponentActivity() {
             status = message
         }
 
-        fun shareAudio(uri: Uri, title: String, prompt: String? = null) {
-            val sendIntent = Intent(Intent.ACTION_SEND).apply {
-                type = "audio/*"
+        fun buildAudioIntent(uri: Uri, mime: String, prompt: String? = null): Intent =
+            Intent(Intent.ACTION_SEND).apply {
+                type = mime
                 putExtra(Intent.EXTRA_STREAM, uri)
                 prompt?.let { putExtra(Intent.EXTRA_TEXT, it) }
                 clipData = ClipData.newUri(contentResolver, "audio", uri)
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
+
+        fun openChatGPT() {
+            val packageName = "com.openai.chatgpt"
+            val launchIntent = packageManager.getLaunchIntentForPackage(packageName)
+            if (launchIntent != null) {
+                runCatching {
+                    startActivity(launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                    status = "ChatGPT abierto."
+                }.onFailure {
+                    val web = Intent(Intent.ACTION_VIEW, Uri.parse("https://chatgpt.com/"))
+                    startActivity(web)
+                    status = "No se pudo abrir la app; se ha abierto ChatGPT en el navegador."
+                }
+            } else {
+                runCatching {
+                    startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://chatgpt.com/")))
+                    status = "ChatGPT abierto en el navegador."
+                }.onFailure {
+                    status = "No se pudo abrir ChatGPT: ${it.message}"
+                }
+            }
+        }
+
+        fun shareAudio(uri: Uri, title: String, prompt: String? = null) {
+            val sendIntent = buildAudioIntent(uri, "audio/mp4", prompt)
             runCatching {
                 startActivity(Intent.createChooser(sendIntent, title))
             }.onFailure {
                 status = "No se pudo compartir el audio: ${it.message}"
+            }
+        }
+
+        fun sendAudioToChatGPT(uri: Uri, prompt: String) {
+            val packageName = "com.openai.chatgpt"
+            val candidates = listOf("audio/mp4", "audio/*", "*/*")
+            var sent = false
+
+            for (mime in candidates) {
+                val direct = buildAudioIntent(uri, mime, prompt).apply {
+                    setPackage(packageName)
+                }
+                if (packageManager.resolveActivity(direct, PackageManager.MATCH_DEFAULT_ONLY) != null) {
+                    runCatching {
+                        grantUriPermission(packageName, uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        startActivity(direct)
+                    }.onSuccess {
+                        sent = true
+                        status = "Audio enviado a ChatGPT. Si el texto no aparece, pega las instrucciones copiadas."
+                    }.onFailure {
+                        status = "ChatGPT no aceptó el audio directamente: ${it.message}"
+                    }
+                    if (sent) break
+                }
+            }
+
+            if (!sent) {
+                val generic = buildAudioIntent(uri, "*/*", prompt)
+                runCatching {
+                    startActivity(Intent.createChooser(generic, "Compartir reunión"))
+                    status = "ChatGPT no expone un receptor directo de audio en este dispositivo. Selecciónalo en Compartir; si no aparece, usa «Abrir ChatGPT» y adjunta el M4A desde Music/TanscriptorRVA."
+                }.onFailure {
+                    openChatGPT()
+                    status = "No se pudo adjuntar mediante Android. ChatGPT se ha abierto para adjuntar manualmente el archivo M4A."
+                }
             }
         }
 
@@ -214,7 +274,7 @@ class MainActivity : ComponentActivity() {
         }
 
         Scaffold(
-            topBar = { TopAppBar(title = { Text("TanscriptorRVA 1.2.0") }) }
+            topBar = { TopAppBar(title = { Text("TanscriptorRVA 1.2.1") }) }
         ) { padding ->
             Column(
                 Modifier.padding(padding).padding(16.dp).fillMaxSize(),
@@ -311,11 +371,7 @@ class MainActivity : ComponentActivity() {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(onClick = {
                             copyPrompt()
-                            shareAudio(
-                                audio!!,
-                                "Enviar reunión a ChatGPT",
-                                chatGptPrompt()
-                            )
+                            sendAudioToChatGPT(audio!!, chatGptPrompt())
                         }) { Text("Enviar a ChatGPT") }
 
                         OutlinedButton(onClick = { copyPrompt() }) {
@@ -333,11 +389,8 @@ class MainActivity : ComponentActivity() {
                         ) { Text("Anterior") }
 
                         Button(onClick = {
-                            shareAudio(
-                                segments[selectedPart],
-                                "Enviar parte ${selectedPart + 1} de ${segments.size}",
-                                chatGptPrompt()
-                            )
+                            copyPrompt()
+                            sendAudioToChatGPT(segments[selectedPart], chatGptPrompt())
                         }) { Text("Enviar parte ${selectedPart + 1}") }
 
                         OutlinedButton(
@@ -354,14 +407,7 @@ class MainActivity : ComponentActivity() {
                         )
                     }) { Text("Importar transcripción") }
 
-                    OutlinedButton(onClick = {
-                        val launchIntent = packageManager.getLaunchIntentForPackage("com.openai.chatgpt")
-                        if (launchIntent != null) {
-                            startActivity(launchIntent)
-                        } else {
-                            status = "No se encontró la app de ChatGPT. Usa «Enviar a ChatGPT» y selecciona una app compatible."
-                        }
-                    }) { Text("Abrir ChatGPT") }
+                    OutlinedButton(onClick = { openChatGPT() }) { Text("Abrir ChatGPT") }
                 }
 
                 Text(status)
