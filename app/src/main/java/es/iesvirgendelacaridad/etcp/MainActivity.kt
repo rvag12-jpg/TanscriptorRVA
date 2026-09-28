@@ -274,7 +274,7 @@ class MainActivity : ComponentActivity() {
         }
 
         Scaffold(
-            topBar = { TopAppBar(title = { Text("TanscriptorRVA 1.2.1") }) }
+            topBar = { TopAppBar(title = { Text("TanscriptorRVA 1.2.2") }) }
         ) { padding ->
             Column(
                 Modifier.padding(padding).padding(16.dp).fillMaxSize(),
