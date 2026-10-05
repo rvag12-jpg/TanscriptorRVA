@@ -69,11 +69,13 @@ class AudioSegmenterTest {
     }
 
     @Test fun shortAudio() = checkFixture("short.m4a", 1, 10_000L)
-    @Test fun fortyFiveMinuteBoundary() = checkFixture("forty_five.m4a", 1, 2_700_000L)
+    @Test fun underFortyFiveMinutes() = checkFixture("under_forty_five.m4a", 1, 2_699_000L)
+    // FFmpeg's AAC encoder adds a 64 ms packet: it also counts towards the cap.
+    @Test fun encoderPaddingCountsTowardsMaximum() = checkFixture("forty_five.m4a", 2, 2_700_000L)
     @Test fun exceedsFortyFiveMinutes() = checkFixture("over_forty_five.m4a", 2, 2_701_000L)
     @Test fun oneHour() = checkFixture("one_hour.m4a", 2, 3_600_000L)
     @Test fun twoHours() = checkFixture("two_hours.m4a", 3, 7_200_000L)
-    @Test fun acceptsSmallerLimit() = checkFixture("one_hour.m4a", 2, 3_600_000L, 30)
+    @Test fun acceptsSmallerLimit() = checkFixture("one_hour.m4a", 2, 3_600_000L, 31)
 
     @Test fun rejectsUnsupportedAudioWithoutRemovingSource() {
         withFixture("unsupported.wav") { uri, source ->

@@ -24,7 +24,7 @@ jobs:
         run: |
           command -v ffmpeg || (sudo apt-get update && sudo apt-get install -y ffmpeg)
           mkdir -p app/src/androidTest/assets
-          for fixture in short:10 forty_five:2700 over_forty_five:2701 one_hour:3600 two_hours:7200; do
+          for fixture in short:10 under_forty_five:2699 forty_five:2700 over_forty_five:2701 one_hour:3600 two_hours:7200; do
             name=${fixture%:*}
             seconds=${fixture#*:}
             ffmpeg -hide_banner -loglevel error -f lavfi -i anullsrc=r=16000:cl=mono -t "$seconds" -c:a aac -b:a 16k "app/src/androidTest/assets/$name.m4a"
