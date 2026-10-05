@@ -1,7 +1,7 @@
 name: Build TanscriptorRVA APK
 on:
   push:
-    branches: [ main ]
+    branches: [ main, codex/audio-max-45-minutos ]
   workflow_dispatch:
 jobs:
   build:
@@ -20,11 +20,33 @@ jobs:
           sdkmanager "platforms;android-36" "build-tools;36.0.0"
       - uses: gradle/actions/setup-gradle@v4
         with: { gradle-version: '9.1.0' }
-      - name: Build APK
+      - name: Generate audio fixtures
+        run: |
+          command -v ffmpeg || (sudo apt-get update && sudo apt-get install -y ffmpeg)
+          mkdir -p app/src/androidTest/assets
+          for fixture in short:10 forty_five:2700 over_forty_five:2701 one_hour:3600 two_hours:7200; do
+            name=${fixture%:*}
+            seconds=${fixture#*:}
+            ffmpeg -hide_banner -loglevel error -f lavfi -i anullsrc=r=16000:cl=mono -t "$seconds" -c:a aac -b:a 16k "app/src/androidTest/assets/$name.m4a"
+          done
+          ffmpeg -hide_banner -loglevel error -f lavfi -i anullsrc=r=16000:cl=mono -t 1 app/src/androidTest/assets/unsupported.wav
+      - name: Build APK and run unit tests
         shell: bash
         run: |
           set -o pipefail
-          gradle :app:assembleDebug --stacktrace --console=plain 2>&1 | tee gradle-build.log
+          gradle :app:testDebugUnitTest :app:assembleDebug :app:assembleDebugAndroidTest --stacktrace --console=plain 2>&1 | tee gradle-build.log
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Verify real audio segmentation on Android
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 29
+          arch: x86_64
+          disable-animations: true
+          script: gradle :app:connectedDebugAndroidTest --console=plain
       - name: Verify APK
         run: |
           APK=app/build/outputs/apk/debug/app-debug.apk
@@ -33,8 +55,8 @@ jobs:
           "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$APK" | tee apk-badging.txt
       - name: Prepare artifact
         run: |
-          cp app/build/outputs/apk/debug/app-debug.apk TanscriptorRVA-1.2.2-debug.apk
-          sha256sum TanscriptorRVA-1.2.2-debug.apk > TanscriptorRVA-1.2.2-debug.apk.sha256
+          cp app/build/outputs/apk/debug/app-debug.apk TanscriptorRVA-1.2.3-debug.apk
+          sha256sum TanscriptorRVA-1.2.3-debug.apk > TanscriptorRVA-1.2.3-debug.apk.sha256
       - name: Upload diagnostics
         if: always()
         uses: actions/upload-artifact@v4
@@ -43,11 +65,14 @@ jobs:
           path: |
             gradle-build.log
             apk-badging.txt
+            app/build/reports/tests/
+            app/build/reports/androidTests/
+            app/build/outputs/androidTest-results/
           if-no-files-found: warn
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: TanscriptorRVA-APK-1.2.2
+          name: TanscriptorRVA-APK-1.2.3
           path: |
-            TanscriptorRVA-1.2.2-debug.apk
-            TanscriptorRVA-1.2.2-debug.apk.sha256
+            TanscriptorRVA-1.2.3-debug.apk
+            TanscriptorRVA-1.2.3-debug.apk.sha256
