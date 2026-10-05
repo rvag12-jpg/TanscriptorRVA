@@ -1,11 +1,22 @@
 plugins { id("com.android.application"); id("org.jetbrains.kotlin.android"); id("org.jetbrains.kotlin.plugin.compose") }
 android {
  namespace = "es.iesvirgendelacaridad.etcp"; compileSdk = 36
- defaultConfig { applicationId = "es.iesvirgendelacaridad.transcriptorrva"; minSdk = 28; targetSdk = 36; versionCode = 5; versionName = "1.2.2" }
+ defaultConfig { applicationId = "es.iesvirgendelacaridad.transcriptorrva"; minSdk = 28; targetSdk = 36; versionCode = 6; versionName = "1.2.3"; testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"; resValue("string", "app_name", "TanscriptorRVA") }
+ buildTypes {
+  create("standalone") {
+   initWith(getByName("debug"))
+   applicationIdSuffix = ".fragmentos"
+   resValue("string", "app_name", "TanscriptorRVA 45 min")
+   matchingFallbacks += "debug"
+  }
+ }
  compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
  buildFeatures { compose = true }
  packaging { resources.excludes += "/META-INF/{AL2.0,LGPL2.1}" }
 }
 dependencies {
+ testImplementation("junit:junit:4.13.2")
+ androidTestImplementation("androidx.test:runner:1.6.2")
+ androidTestImplementation("androidx.test.ext:junit:1.2.1")
  implementation(platform("androidx.compose:compose-bom:2025.12.01")); implementation("androidx.activity:activity-compose:1.12.1"); implementation("androidx.compose.material3:material3"); implementation("androidx.compose.ui:ui"); implementation("androidx.compose.ui:ui-tooling-preview"); implementation("androidx.core:core-ktx:1.17.0"); debugImplementation("androidx.compose.ui:ui-tooling")
 }

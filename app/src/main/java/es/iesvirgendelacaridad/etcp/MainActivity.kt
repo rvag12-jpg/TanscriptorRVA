@@ -16,6 +16,8 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -67,7 +69,7 @@ class MainActivity : ComponentActivity() {
     private fun EtcpApp() {
         var audio by remember { mutableStateOf<Uri?>(null) }
         var audioName by remember { mutableStateOf("") }
-        var segments by remember { mutableStateOf<List<Uri>>(emptyList()) }
+        var segments by remember { mutableStateOf<List<AudioSegmenter.Part>>(emptyList()) }
         var selectedPart by remember { mutableIntStateOf(0) }
         var busy by remember { mutableStateOf(false) }
         var transcript by remember { mutableStateOf("") }
@@ -97,7 +99,6 @@ class MainActivity : ComponentActivity() {
         }
 
         fun useAudio(uri: Uri, message: String) {
-            if (segments.isNotEmpty()) AudioSegmenter.deleteSegments(this@MainActivity, segments)
             audio = uri
             audioName = displayName(uri)
             segments = emptyList()
@@ -202,6 +203,32 @@ class MainActivity : ComponentActivity() {
             status = "Instrucciones copiadas. Compártelas junto con el audio en ChatGPT."
         }
 
+        fun prepareAudio(sendWhenReady: Boolean = false) {
+            val source = audio ?: return
+            busy = true
+            status = "Dividiendo el audio en fragmentos similares de hasta 45 minutos…"
+            scope.launch {
+                try {
+                    val parts = withContext(Dispatchers.IO) {
+                        AudioSegmenter.segment(this@MainActivity, source)
+                    }
+                    segments = parts
+                    selectedPart = 0
+                    status = "Audio dividido en ${parts.size} fragmento(s) de duración similar, todos de 45 minutos o menos. Original conservado."
+                    if (sendWhenReady) {
+                        copyPrompt()
+                        sendAudioToChatGPT(parts.first().uri, chatGptPrompt())
+                    }
+                } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                    throw cancelled
+                } catch (error: Exception) {
+                    status = "No se pudo procesar «$audioName»: ${error.message}"
+                } finally {
+                    busy = false
+                }
+            }
+        }
+
         val microphonePermissionLauncher = rememberLauncherForActivityResult(
             ActivityResultContracts.RequestMultiplePermissions()
         ) { grants ->
@@ -274,10 +301,10 @@ class MainActivity : ComponentActivity() {
         }
 
         Scaffold(
-            topBar = { TopAppBar(title = { Text("TanscriptorRVA 1.2.2") }) }
+            topBar = { TopAppBar(title = { Text("TanscriptorRVA 1.2.3") }) }
         ) { padding ->
             Column(
-                Modifier.padding(padding).padding(16.dp).fillMaxSize(),
+                Modifier.padding(padding).padding(16.dp).fillMaxSize().verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 OutlinedTextField(
@@ -343,36 +370,19 @@ class MainActivity : ComponentActivity() {
 
                     Button(
                         enabled = audio != null && !busy && !recording,
-                        onClick = {
-                            val source = audio ?: return@Button
-                            busy = true
-                            status = "Comprobando y preparando fragmentos…"
-                            scope.launch {
-                                runCatching {
-                                    withContext(Dispatchers.IO) {
-                                        AudioSegmenter.segment(this@MainActivity, source, 45)
-                                    }
-                                }.onSuccess {
-                                    segments = it
-                                    selectedPart = 0
-                                    status = "Audio preparado en ${it.size} parte(s)."
-                                }.onFailure {
-                                    status = "No se pudo procesar «$audioName»: ${it.message}"
-                                }
-                                busy = false
-                            }
-                        }
-                    ) { Text(if (busy) "Procesando…" else "Preparar audio") }
+                        onClick = { prepareAudio() }
+                    ) { Text(if (busy) "Procesando…" else "Dividir ≤45 min") }
                 }
 
                 if (audio != null) {
                     Text("Audio actual: $audioName")
 
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(onClick = {
-                            copyPrompt()
-                            sendAudioToChatGPT(audio!!, chatGptPrompt())
-                        }) { Text("Enviar a ChatGPT") }
+                        if (segments.isEmpty()) {
+                            Button(enabled = !busy && !recording, onClick = { prepareAudio(sendWhenReady = true) }) {
+                                Text("Preparar y enviar")
+                            }
+                        }
 
                         OutlinedButton(onClick = { copyPrompt() }) {
                             Text("Copiar instrucciones")
@@ -381,23 +391,27 @@ class MainActivity : ComponentActivity() {
                 }
 
                 if (segments.isNotEmpty()) {
-                    Text("Fragmentos: ${segments.size} · Seleccionado: ${selectedPart + 1}/${segments.size}")
+                    val part = segments[selectedPart]
+                    val seconds = part.durationMs / 1000
+                    Text("Fragmento ${selectedPart + 1}/${segments.size} · Duración: %02d:%02d".format(seconds / 60, seconds % 60))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         OutlinedButton(
-                            enabled = selectedPart > 0,
+                            enabled = !busy && selectedPart > 0,
                             onClick = { selectedPart-- }
                         ) { Text("Anterior") }
 
-                        Button(onClick = {
-                            copyPrompt()
-                            sendAudioToChatGPT(segments[selectedPart], chatGptPrompt())
-                        }) { Text("Enviar parte ${selectedPart + 1}") }
-
                         OutlinedButton(
-                            enabled = selectedPart < segments.lastIndex,
+                            enabled = !busy && selectedPart < segments.lastIndex,
                             onClick = { selectedPart++ }
                         ) { Text("Siguiente") }
                     }
+                    Button(enabled = !busy && !recording, onClick = {
+                        copyPrompt()
+                        sendAudioToChatGPT(segments[selectedPart].uri, chatGptPrompt())
+                    }) { Text("Enviar parte ${selectedPart + 1} a ChatGPT") }
+                    OutlinedButton(enabled = !busy, onClick = {
+                        shareAudio(segments[selectedPart].uri, "Compartir fragmento ${selectedPart + 1}")
+                    }) { Text("Compartir parte ${selectedPart + 1}") }
                 }
 
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -417,7 +431,7 @@ class MainActivity : ComponentActivity() {
                     onValueChange = { transcript = it },
                     label = { Text("Transcripción") },
                     placeholder = { Text("Importa o pega aquí la transcripción completa") },
-                    modifier = Modifier.fillMaxWidth().weight(1f)
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 120.dp, max = 260.dp)
                 )
 
                 OutlinedTextField(
@@ -425,7 +439,7 @@ class MainActivity : ComponentActivity() {
                     onValueChange = { summary = it },
                     label = { Text("Resumen / JSON de acta") },
                     placeholder = { Text("Pega aquí el JSON generado por ChatGPT o un resumen en texto") },
-                    modifier = Modifier.fillMaxWidth().weight(1f)
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 120.dp, max = 260.dp)
                 )
 
                 Button(
