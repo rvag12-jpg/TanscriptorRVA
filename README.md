@@ -43,7 +43,12 @@ duplicaciones o cambios de orden.
 ### Compilación
 
 Java 17, Gradle 9.1.0, Android SDK 36 y Build Tools 36.0.0.
-`gradle :app:testDebugUnitTest :app:assembleDebug`.
-El APK de depuración conserva el identificador de la aplicación, pero instalarlo
-como actualización requiere firmarlo con la misma clave que el APK anterior.
-La clave privada de la versión 1.2.2 no se incluye en los archivos disponibles.
+`gradle :app:testDebugUnitTest :app:assembleDebug :app:assembleStandalone`.
+El APK `TanscriptorRVA-1.2.3-45min.apk` usa un identificador independiente
+(`es.iesvirgendelacaridad.transcriptorrva.fragmentos`) y aparece como
+**TanscriptorRVA 45 min**. Puede instalarse junto a la versión anterior.
+No importa automáticamente sus transcripciones; los audios guardados en Music
+pueden cargarse mediante **Cargar audio**.
+La variante `debug` conserva el identificador original, pero para usarla como
+actualización se necesita la clave de firma de la versión instalada. Esa clave
+privada no se incluye en los archivos disponibles de la versión 1.2.2.

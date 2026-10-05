@@ -14,7 +14,7 @@
 
     <application
         android:allowBackup="true"
-        android:label="TanscriptorRVA"
+        android:label="@string/app_name"
         android:theme="@style/Theme.ETCPResumen">
 
         <provider
